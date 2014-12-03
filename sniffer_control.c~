@@ -1,0 +1,142 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <getopt.h>
+#include "sniffer_ioctl.h"
+#include <netdb.h>
+
+static char * program_name;
+static char * dev_file = "sniffer.dev";
+
+void usage() 
+{
+    fprintf(stderr, "Usage: %s [parameters]\n"
+                "parameters: \n"
+                "    --mode [enable|disable]\n"
+                "    --src_ip [url|any] : default is any \n"
+                "    --src_port [XXX|any] : default is any \n"
+                "    --dst_ip [url|any] : default is any \n" 
+                "    --dst_port [XXX|any] : default is any \n"
+                "    --action [capture|dpi] : default is null\n", program_name);
+    exit(EXIT_FAILURE);
+}
+
+int sniffer_send_command(struct sniffer_flow_entry *flow)
+{
+	int file = open(flow->dev_file, 0);
+	if (file < 0) {
+		printf("Unable to open device: %s\n", flow->dev_file);
+		return -1;
+	}
+	int res = ioctl(file, flow->mode, flow);
+	if (res < 0) {
+		printf("Error with ioctl\n");
+		return -1;
+	}
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    int c;
+    program_name = argv[0];
+	struct sniffer_flow_entry * flow = (struct sniffer_flow_entry *) malloc (sizeof(struct sniffer_flow_entry));
+	flow->mode = 0;
+	flow->src_ip = 0;
+	flow->dest_ip = 0;
+	flow->src_port = 0;
+	flow->dest_port = 0;
+	flow->action = 0;
+	flow->dev_file = dev_file;
+
+    while(1) {
+        static struct option long_options[] = 
+        {
+            {"mode", required_argument, 0, 0},
+            {"src_ip", required_argument, 0, 0},
+            {"src_port", required_argument, 0, 0},
+            {"dst_ip", required_argument, 0, 0},
+            {"dst_port", required_argument, 0, 0},
+            {"action", required_argument, 0, 0},
+            {"dev", required_argument, 0, 0},
+            {0, 0, 0, 0}
+        };
+        int option_index = 0;
+        c = getopt_long (argc, argv, "", long_options, &option_index);
+
+        if (c == -1)
+            break;
+
+        switch (c) {
+        case 0:
+            printf("option %d %s", option_index, long_options[option_index].name);
+            if (optarg)
+                printf(" with arg %s", optarg);
+            printf("\n");
+			char * enable = "enable";
+			char * disable = "disable";
+			char * capture = "capture";
+			char * dpi = "dpi";
+			struct hostent * host = (struct hostent *) malloc (sizeof(struct hostent));
+            switch(option_index) {
+            case 0:     // mode
+				if (strcmp(optarg, enable) == 0) {
+					flow->mode = SNIFFER_FLOW_ENABLE;
+				}
+				else if (strcmp(optarg, disable) == 0)
+					flow->mode = SNIFFER_FLOW_DISABLE;
+				else {
+					printf("Wrong input for mode\n");
+					exit(0);
+				}
+                break;
+            case 1:     // src_ip
+				host = gethostbyname(optarg);
+				if (host == NULL) {
+					printf("Error: src domain name unresolvable\n");
+				}
+				else
+					flow->src_ip = ntohl(*((unsigned int *)(host->h_addr_list[0])));
+                break;
+            case 2:     // src_port
+				flow->src_port = (uint16_t)atoi(optarg);
+                break;
+            case 3:     // dst_ip
+				host = gethostbyname(optarg);
+				if (host == NULL) {
+					printf("Error: dest domain name unresolvable\n");
+				}
+				else
+					flow->dest_ip = ntohl(*((unsigned int *)(host->h_addr_list[0])));
+                break;
+            case 4:     // dst_port
+				flow->dest_port = (uint16_t)atoi(optarg);
+                break;
+            case 5:     // action
+				if (strcmp(optarg, capture) == 0) {
+					flow->action = SNIFFER_ACTION_CAPTURE;
+				}
+				else if (strcmp(optarg, dpi) == 0)
+					flow->action = SNIFFER_ACTION_DPI;
+				else {
+					flow->action = SNIFFER_ACTION_NULL;
+				}
+                break;
+            case 6:     // dev
+				flow->dev_file = dev_file;
+                break;
+            }
+            break;
+        default:
+            usage();
+        }
+		printf("%d\n", flow->dest_ip);
+    }
+	sniffer_send_command(flow);
+	free(flow);
+
+    return 0;
+}

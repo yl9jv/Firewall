@@ -1,0 +1,84 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <getopt.h>
+#include "sniffer_ioctl.h"
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <netinet/tcp.h>
+#include <netinet/in.h>
+
+#define PACKET_SIZE 65535
+
+static char * program_name;
+static char * dev_file = "sniffer.dev";
+
+void usage() 
+{
+    fprintf(stderr, "Usage: %s [-i input_file] [-o output_file]\n", program_name);
+    exit(EXIT_FAILURE);
+}
+
+int print_packet(char * pkt, int len)
+{
+    /* print format is :
+     * src_ip:src_port -> dst_ip:dst_port
+     * pkt[0] pkt[1] ...    pkt[64] \n
+     * ...
+     * where pkt[i] is a hex byte */
+	struct ip_hdr_t * ip_h;
+	struct tcp_hdr_t * tcp_h;
+	ip_h = (struct ip_hdr_t *)(pkt);
+	int ip_len = IP_HL(ip_h) * 4;
+	tcp_h = (struct tcp_hdr_t *)(pkt + ip_len);
+	uint32_t src_ip = (ip_h->src_ip);
+	uint32_t dst_ip = (ip_h->dst_ip);
+	uint16_t src_port = ntohs(tcp_h->src_port);
+	uint16_t dst_port = ntohs(tcp_h->dst_port);
+	printf(" %d.%d.%d.%d:%d -> ", (src_ip & 0x000000ff), (src_ip & 0x0000ff00) >> 8,(src_ip & 0x00ff0000) >> 16, (src_ip & 0xff000000) >> 24, src_port);
+	printf("%d.%d.%d.%d port:%d\n", (dst_ip & 0x000000ff), (dst_ip & 0x0000ff00) >> 8,(dst_ip & 0x00ff0000) >> 16, (dst_ip & 0xff000000 ) >> 24, dst_port);
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    int c;
+    char *input_file, *output_file = NULL;
+    program_name = argv[0];
+
+    input_file= dev_file;
+
+    while((c = getopt(argc, argv, "i:o:")) != -1) {
+        switch (c) {
+        case 'i':
+            input_file = strdup(optarg);
+            break;
+        case 'o':
+			output_file = strdup(optarg);
+            break;
+        default:
+            usage();
+        }
+    }
+	int f = open(input_file, 0);
+    if (f < 0){
+		printf("cannot open file: %s\n", input_file);
+		return 0;
+    }
+	if (output_file)
+		freopen(output_file,"w",stdout);
+    char buffer[PACKET_SIZE];
+    int size = -1;
+    while((size = read(f, buffer, PACKET_SIZE))>0) {
+		print_packet(buffer, size);
+		int i;
+		for(i = 0; i < size; i++)
+			printf("%x ", (unsigned char) buffer[i]);
+		printf("\n");
+    }
+    return 0;
+}
