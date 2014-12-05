@@ -54,6 +54,90 @@ struct node {
 	int action;
 };
 
+FLAG check_flag(struct tcphdr *tcph) {
+	FLAG cur_flag = INIT;
+	if (tcph->syn) {
+		if (tcph->ack)
+			cur_flag = SYNACK;
+		else
+			cur_flag = SYN;
+	}
+	else if (tcph->ack)
+		cur_flag = ACK;
+	else if (tcph->rst)
+		cur_flag = RST;
+	else if (tcph->fin)
+		cur_flag = FIN;
+	return cur_flag;
+}
+
+u_int hash_function(table_key * key) {
+	return key->src_ip ^ key->dst_ip ^ key->src_port ^ key->dst_port;
+}
+
+hash_table * create_hash_table(int size) {
+	hash_table * table = (hash_table *) kmalloc (sizeof(hash_table), GFP_ATOMIC);
+	table->size = size;
+	table->occupied = 0;
+	table->head = kmalloc (sizeof(linked_list) * size, GFP_ATOMIC);
+	return table;
+}
+
+void * find_key(linked_list * head, table_key * key, FLAG f) {
+	table_key * cur = head->list;
+	while (cur != NULL) {
+		if (f == SYN || f == ACK || f == RST || f == FIN) {
+			if (cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur-> proto == key->proto)
+				return cur;
+		}
+		if (f == SYNACK || f == RST || f == FIN) {
+			if (cur->src_ip == key->dst_ip && cur->dst_ip == key->src_ip && cur->src_port == key->dst_port && cur->dst_port == key->src_port && cur-> proto == key->proto)
+				return cur;
+		}
+	}
+}
+
+void * find_list(hash_table * table, table_key * key, FLAG f) {
+	u_int hash = hash_function(key) % table->size;
+	if (table->head[hash] == NULL)
+		return NULL;
+	else
+		return find_key(table->head[hash], key, f);
+}
+
+table_key * insert_into_list(linked_list * list, table_key * key, FLAG f) {
+	table_key * found = find_key(list, key, f);
+	if (found == NULL) {
+		found = kmalloc (sizeof(table_key), GFP_ATOMIC);
+		found->src_ip = key->src_ip;
+		found->dst_ip = key->dst_ip;
+		found->src_port = key->src_port;
+		found->dst_port = key->dst_port;
+		found->state = key->state;
+		found->proto = key->proto;
+		found->next = list->list;
+		list->list = found;
+		return NULL;
+	}
+	return found;
+}
+
+table_key * insert_into_table(hash_table * table, table_key * key, FLAG f) {
+	u_int hash = hash_function(key) % table->size;
+	if (table->head[hash] == NULL) {
+		linked_list * list = (linked_list *) kmalloc (sizeof(linked_list), GFP_ATOMIC);
+		list->list = NULL;
+		table->head[hash] = list;
+	}
+	table_key * found = insert_into_list(table->head[hash], key, f);
+	if (found != NULL)
+		return found;
+	table->occupied ++;
+	return NULL;
+}
+
+
+
 // skb buffer between kernel and user space
 struct list_head skbs;
 struct list_head buffer;

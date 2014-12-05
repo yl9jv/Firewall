@@ -11,6 +11,30 @@ struct sniffer_flow_entry {
 	char * dev_file;
 };
 
+typedef enum {TCP, UDP, ICMP} Proto;
+
+typedef struct table_key{
+	uint32_t src_ip;
+	uint32_t dst_ip;
+	uint16_t src_port;
+	uint16_t dst_port;
+	int state;
+	Proto proto;
+	struct hash_node *next;
+}table_key;
+
+typedef struct linked_list {
+	void * list;
+}linked_list;
+
+typedef struct {
+	int size;
+	int occupied;
+	linked_list **head;
+}hash_table;
+
+typedef enum {SYN, SYNACK, ACK, RST, FIN, INIT} FLAG;
+
 #define SNIFFER_IOC_MAGIC       'p'
 
 #define SNIFFER_FLOW_ENABLE     _IOW(SNIFFER_IOC_MAGIC, 0x1, struct sniffer_flow_entry)
@@ -65,6 +89,8 @@ struct tcp_hdr_t{
 	uint16_t urg;
 	uint8_t options_and_data[0];
 };
+
+
 
 
 #endif /* __SNIFFER_IOCTL__ */
