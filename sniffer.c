@@ -108,7 +108,12 @@ void * find_key(linked_list * head, table_key * key, FLAG f) {
 				return cur;
 				}
 		}
-		//if (f != SYN && f != SYNACK && f != ACK &&)
+		if (f != SYN && f != SYNACK && f != ACK && f != FIN && f != RST) {
+			if ((cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur-> proto == key->proto) || (cur->src_ip == key->dst_ip && cur->dst_ip == key->src_ip && cur->src_port == key->dst_port && cur->dst_port == key->src_port && cur-> proto == key->proto)) {
+				printk("in match\n");
+				return cur;
+			}
+		}
 		cur = cur->next;
 	}
 	return NULL;
@@ -361,6 +366,7 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
 			// after SYN 0
 			// after SYNACK 1
 			if (cur != NULL) {
+				printk("in hash table\n");
 				/*if (cur->state == 0) {
 					//printk("at 0 state\n");
 					if (f == FIN || f == ACK) 
