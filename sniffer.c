@@ -41,6 +41,7 @@ static int hook_chain_out = NF_INET_POST_ROUTING;
 
 struct semaphore sem;
 wait_queue_head_t queue;
+hash_table * table;
 
 //To test GET /courses/2014fa/cs5413/labs/big
 #define SIGNATURE "30000"
@@ -79,9 +80,15 @@ u_int hash_function(table_key * key) {
 
 hash_table * create_hash_table(int size) {
 	hash_table * table = (hash_table *) kmalloc (sizeof(hash_table), GFP_ATOMIC);
+	memset(table, 0, sizeof(hash_table));
 	table->size = size;
 	table->occupied = 0;
-	table->head = kmalloc (sizeof(linked_list) * size, GFP_ATOMIC);
+	table->head = (linked_list **) vmalloc (sizeof(linked_list) * size);
+	memset(table->head, 0, sizeof(linked_list));
+	int i = 0;
+	for (; i < size; i++) {
+		table->head[i] = NULL;
+	}
 	return table;
 }
 
@@ -89,28 +96,29 @@ void * find_key(linked_list * head, table_key * key, FLAG f) {
 	table_key * cur = head->list;
 	while (cur != NULL) {
 		if (f == SYN || f == ACK || f == RST || f == FIN) {
-			if (cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur-> proto == key->proto)
+			//printk("SYN packet");
+			if (cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur-> proto == key->proto) {
+				//printk("in match\n");
 				return cur;
+			}
 		}
 		if (f == SYNACK || f == RST || f == FIN) {
-			if (cur->src_ip == key->dst_ip && cur->dst_ip == key->src_ip && cur->src_port == key->dst_port && cur->dst_port == key->src_port && cur-> proto == key->proto)
+			if (cur->src_ip == key->dst_ip && cur->dst_ip == key->src_ip && cur->src_port == key->dst_port && cur->dst_port == key->src_port && cur-> proto == key->proto) {
+				//printk("out match\n");
 				return cur;
+				}
 		}
+		//if (f != SYN && f != SYNACK && f != ACK &&)
+		cur = cur->next;
 	}
-}
-
-void * find_list(hash_table * table, table_key * key, FLAG f) {
-	u_int hash = hash_function(key) % table->size;
-	if (table->head[hash] == NULL)
-		return NULL;
-	else
-		return find_key(table->head[hash], key, f);
+	return NULL;
 }
 
 table_key * insert_into_list(linked_list * list, table_key * key, FLAG f) {
 	table_key * found = find_key(list, key, f);
 	if (found == NULL) {
-		found = kmalloc (sizeof(table_key), GFP_ATOMIC);
+		found = (table_key *)kmalloc (sizeof(table_key), GFP_ATOMIC);
+		memset(found, 0, sizeof(table_key));
 		found->src_ip = key->src_ip;
 		found->dst_ip = key->dst_ip;
 		found->src_port = key->src_port;
@@ -119,6 +127,7 @@ table_key * insert_into_list(linked_list * list, table_key * key, FLAG f) {
 		found->proto = key->proto;
 		found->next = list->list;
 		list->list = found;
+		printk("Inserted into table\n");
 		return NULL;
 	}
 	return found;
@@ -128,6 +137,7 @@ table_key * insert_into_table(hash_table * table, table_key * key, FLAG f) {
 	u_int hash = hash_function(key) % table->size;
 	if (table->head[hash] == NULL) {
 		linked_list * list = (linked_list *) kmalloc (sizeof(linked_list), GFP_ATOMIC);
+		memset(list, 0, sizeof(linked_list));
 		list->list = NULL;
 		table->head[hash] = list;
 	}
@@ -136,6 +146,16 @@ table_key * insert_into_table(hash_table * table, table_key * key, FLAG f) {
 		return found;
 	table->occupied ++;
 	return NULL;
+}
+
+table_key * find(hash_table * table, table_key * key, FLAG f) {
+	u_int hash = hash_function(key) % table->size;
+	if (table->head[hash] == NULL)
+		return NULL;
+	hash_table * test = find_key(table->head[hash], key, f);
+	/*if (test == NULL)
+		printk("shabi");*/
+	return test;
 }
 
 
@@ -262,7 +282,6 @@ static long sniffer_fs_ioctl(struct file *file, unsigned int cmd, unsigned long 
 	//printk("%d==============\n", cmd);
 	struct sniffer_flow_entry * flow = (struct sniffer_flow_entry *) arg;
 	//printk("src ip: %d, dest ip: %d, src port: %d, dest port: %d, action: %d, mode: %d", flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->action, flow->mode);
-	printk("%d", flow->proto);
     if (_IOC_TYPE(cmd) != SNIFFER_IOC_MAGIC)
         return -ENOTTY; 
     if (_IOC_NR(cmd) > SNIFFER_IOC_MAXNR)
@@ -320,43 +339,141 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
         if (ntohs(tcph->dest) == 22)
             return NF_ACCEPT;
 
-        if (ntohs(tcph->dest ) != 22) {
-            struct node * node;
-			list_for_each_entry(node, &skbs, list) {
-				if ((node->src_ip == ntohl(iph->saddr) || node->src_ip == 0) && (node->dest_ip == ntohl(iph->daddr) || node->dest_ip == 0) && (node->src_port == ntohs(tcph->source) || node->src_port == 0) && (node->dest_port == ntohs(tcph->dest) || node->dest_port == 0) && (node->proto == 0)) {
-							if (node->action == SNIFFER_ACTION_CAPTURE) {
-								struct skb_list * temp= (struct skb_list *) kmalloc (sizeof(struct skb_list), GFP_ATOMIC);
-								temp->skb=skb_copy(skb, GFP_ATOMIC);
-								down_interruptible(&sem);
-								list_add_tail(&temp->list, &buffer);
-								up(&sem);
-								wake_up_interruptible(&queue);
-							}
-							if (node->action == SNIFFER_ACTION_DPI) {
-								struct ip_hdr_t * ip_h = skb->data;
-								int ip_len =IP_HL(ip_h) * 4;
-								struct tcp_hdr_t * tcp_h = ip_h + ip_len;
-								char * data = skb->data + ip_len + sizeof(struct tcp_hdr_t);
-								int data_len = skb->len - ip_len - sizeof(struct tcp_hdr_t);
-								int i, j;
-								int flag = 0;
-								int sig_len=strlen(SIGNATURE);
-								for (i = 0; i < data_len - sig_len; i++) {
-									flag = 1;
-									for (j = 0;j < sig_len; j++) {
-										if (data[i + j] != SIGNATURE[j]) {
-											flag = 0;
-											break;
+        if (ntohs(tcph->dest) != 22) {
+			FLAG f = check_flag(tcph);
+			if (f == SYN)			
+			printk("1111\n");
+			if (f == SYNACK)
+			printk("2222\n");
+			if (f == ACK)
+			printk("3333\n");
+
+			table_key * key = (table_key *) kmalloc (sizeof(table_key), GFP_ATOMIC);
+			memset(key, 0, sizeof(table_key));
+			key->src_ip = ntohl(iph->saddr);
+			key->dst_ip = ntohl(iph->daddr);
+			key->src_port = ntohs(tcph->source);
+			key->dst_port = ntohs(tcph->dest);
+			key->proto = 0;
+			key->state = 0;
+			key->next = NULL;
+			table_key * cur = find(table, key, f);
+			// after SYN 0
+			// after SYNACK 1
+			if (cur != NULL) {
+				/*if (cur->state == 0) {
+					//printk("at 0 state\n");
+					if (f == FIN || f == ACK) 
+						return NF_DROP;
+					else if (f == SYN)
+						return NF_ACCEPT;
+					else if (f == SYNACK) {
+						cur->state = 1;
+						return NF_ACCEPT;
+					}
+					else
+						return NF_ACCEPT;
+				}
+				if (cur->state == 1) {
+					printk("at state 1\n");
+					if (f == SYN || f == FIN)
+						return NF_DROP;
+					else if (f == ACK) {
+						cur->state = 2;
+						return NF_ACCEPT;
+					}
+					else if (f == RST) {
+						cur->state = 0;
+						return NF_ACCEPT;
+					}
+					else
+						return NF_ACCEPT;
+				}
+				if (cur->state == 2) {
+					printk("at state 2\n");
+					if (f == SYN || f == SYNACK) {
+						printk("SYN/SYNACK\n");
+						return NF_DROP;
+					}
+					else if (f == FIN) {
+						cur->state = 3;
+						return NF_ACCEPT;
+					}
+					else if (f == RST) {
+						printk("RST");
+						cur->state = 0;
+						return NF_ACCEPT;
+					}
+					else {
+						printk("ACK");
+						return NF_ACCEPT;
+					}
+				}
+				if (cur->state == 3) {
+					printk("at state 3\n");
+					if (f == FIN) {
+						cur->state = 4;
+						return NF_ACCEPT;
+					}
+					else if (f == RST) {
+						cur->state = 0;
+						return NF_ACCEPT;
+					}
+					else
+						return NF_DROP;
+				}
+				if (cur->state == 4) {
+					printk("at state 4\n");
+					if (f == SYN) {
+						// TODO
+						cur->state = 0;
+						return NF_ACCEPT;
+					}
+					else
+						return NF_DROP;
+				}*/
+				return NF_ACCEPT;
+			}
+			else {
+				printk("not in hash table\n");
+            	struct node * node;
+				list_for_each_entry(node, &skbs, list) {
+					if ((node->src_ip == ntohl(iph->saddr) || node->src_ip == 0) && (node->dest_ip == ntohl(iph->daddr) || node->dest_ip == 0) && (node->src_port == ntohs(tcph->source) || node->src_port == 0) && (node->dest_port == ntohs(tcph->dest) || node->dest_port == 0) && (node->proto == 0)) {
+								if (node->action == SNIFFER_ACTION_CAPTURE) {
+									struct skb_list * temp= (struct skb_list *) kmalloc (sizeof(struct skb_list), GFP_ATOMIC);
+									temp->skb=skb_copy(skb, GFP_ATOMIC);
+									down_interruptible(&sem);
+									list_add_tail(&temp->list, &buffer);
+									up(&sem);
+									wake_up_interruptible(&queue);
+								}
+								if (node->action == SNIFFER_ACTION_DPI) {
+									struct ip_hdr_t * ip_h = skb->data;
+									int ip_len =IP_HL(ip_h) * 4;
+									struct tcp_hdr_t * tcp_h = ip_h + ip_len;
+									char * data = skb->data + ip_len + sizeof(struct tcp_hdr_t);
+									int data_len = skb->len - ip_len - sizeof(struct tcp_hdr_t);
+									int i, j;
+									int flag = 0;
+									int sig_len=strlen(SIGNATURE);
+									for (i = 0; i < data_len - sig_len; i++) {
+										flag = 1;
+										for (j = 0;j < sig_len; j++) {
+											if (data[i + j] != SIGNATURE[j]) {
+												flag = 0;
+												break;
+											}
+										}
+										if (flag == 1) {
+											delete(node->src_ip, node->dest_ip, node->src_port, node->dest_port, node->direction, node->proto);
+											return NF_DROP;
 										}
 									}
-									if (flag == 1) {
-										delete(node->src_ip, node->dest_ip, node->src_port, node->dest_port, node->direction, node->proto);
-										return NF_DROP;
-									}
 								}
-							}				
-							//printk("Allowed\n");
-							return NF_ACCEPT;
+								insert_into_table(table, key, f);		
+								//printk("Allowed\n");
+								return NF_ACCEPT;
+					}
 				}
 			}
         	printk(KERN_DEBUG "Rejected %d %x\n", ntohs(tcph->dest), iph->saddr);
@@ -370,7 +487,7 @@ static int __init sniffer_init(void)
 {
     int status = 0;
     printk(KERN_DEBUG "sniffer_init\n"); 
-
+	table = create_hash_table(600000);
     status = alloc_chrdev_region(&sniffer_dev, 0, sniffer_minor, "sniffer");
     if (status <0) {
         printk(KERN_ERR "alloc_chrdev_retion failed %d\n", status);
@@ -438,6 +555,7 @@ static void __exit sniffer_exit(void)
     }
     cdev_del(&sniffer_cdev);
     unregister_chrdev_region(sniffer_dev, sniffer_minor);
+	printk(KERN_DEBUG "sniffer_exit\n");
 }
 
 module_init(sniffer_init);
