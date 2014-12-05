@@ -110,7 +110,13 @@ void * find_key(linked_list * head, table_key * key, FLAG f) {
 		}
 		if (f != SYN && f != SYNACK && f != ACK && f != FIN && f != RST) {
 			if ((cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur-> proto == key->proto) || (cur->src_ip == key->dst_ip && cur->dst_ip == key->src_ip && cur->src_port == key->dst_port && cur->dst_port == key->src_port && cur-> proto == key->proto)) {
-				printk("in match\n");
+				//printk("in match\n");
+				return cur;
+			}
+		}
+		if (f == INIT) {
+			if (cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur->proto == key->proto) {
+				printk("UDP or ICMP matched!\n");
 				return cur;
 			}
 		}
@@ -301,12 +307,12 @@ static long sniffer_fs_ioctl(struct file *file, unsigned int cmd, unsigned long 
     switch(cmd) {
     case SNIFFER_FLOW_ENABLE:
         insert(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->action, flow->direction, flow->proto);
-		printk("Enable");
+		printk("Enable\n");
         break;
     case SNIFFER_FLOW_DISABLE:
         //insert(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->action, 0);
 		delete(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->direction, flow->proto);
-		printk("Disable");
+		printk("Disable\n");
         break;
     default:
         printk(KERN_DEBUG "Unknown command\n");
@@ -331,10 +337,33 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
     struct iphdr *iph = ip_hdr(skb);
 	if (iph->protocol == IPPROTO_UDP) {
 		struct udphdr *udph = ip_udp_hdr(iph);
-		if (ntohs(udph->dest) == 53)
+		/*if (ntohs(udph->dest) == 53)
 			return NF_ACCEPT;
 		if (ntohs(udph->source) == 53)
+			return NF_ACCEPT;*/
+		FLAG f = INIT;
+		table_key * key = (table_key *) kmalloc (sizeof(table_key), GFP_ATOMIC);
+		memset(key, 0, sizeof(table_key));
+		key->src_ip = ntohl(iph->saddr);
+		key->dst_ip = ntohl(iph->daddr);
+		key->src_port = ntohs(udph->source);
+		key->dst_port = ntohs(udph->dest);
+		key->proto = 0;
+		key->state = 0;
+		key->next = NULL;
+		table_key * cur = find(table, key, f);
+		if (cur != NULL)
 			return NF_ACCEPT;
+		else {
+			printk("NOT IN HASH MAP\n");
+			struct node * node;
+			list_for_each_entry(node, &skbs, list) {
+				if ((node->src_ip == ntohl(iph->saddr) || node->src_ip == 0) && (node->dest_ip == ntohl(iph->daddr) || node->dest_ip == 0) && (node->src_port == ntohs(udph->source) || node->src_port == 0) && (node->dest_port == ntohs(udph->dest) || node->dest_port == 0) && (node->proto == 1)) {
+					insert_into_table(table, key, f);
+					return NF_ACCEPT;
+				}
+			}
+		}
 		return NF_DROP;
 	}
     if (iph->protocol == IPPROTO_TCP) {
@@ -346,12 +375,12 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
 
         if (ntohs(tcph->dest) != 22) {
 			FLAG f = check_flag(tcph);
-			if (f == SYN)			
+			/*if (f == SYN)			
 			printk("1111\n");
 			if (f == SYNACK)
 			printk("2222\n");
 			if (f == ACK)
-			printk("3333\n");
+			printk("3333\n");*/
 
 			table_key * key = (table_key *) kmalloc (sizeof(table_key), GFP_ATOMIC);
 			memset(key, 0, sizeof(table_key));
