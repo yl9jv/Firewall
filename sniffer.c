@@ -367,6 +367,55 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
 			// after SYNACK 1
 			if (cur != NULL) {
 				printk("in hash table\n");
+				if (f == SYN) {
+					if (cur->state == 4 || cur->state == 0) {
+						if (cur->state == 4) {
+							//TODO
+							cur->state = 0;
+							return NF_ACCEPT;
+						}
+						else
+							return NF_ACCEPT;
+					}
+					else 
+						return NF_DROP;
+				}
+				if (f == SYNACK) {
+					if (cur->state == 0) {
+						cur->state = 1;
+						return NF_ACCEPT;
+					}
+					else if (cur->state == 1)
+						return NF_ACCEPT;
+					else
+						return NF_DROP;
+				}
+				if (f == ACK) {
+					if (cur->state == 1) {
+						cur->state = 2;
+						return NF_ACCEPT;
+					}
+					else if (cur->state == 2)
+						return NF_ACCEPT;
+					else 
+						return NF_ACCEPT;
+				}
+				if (f == FIN) {
+					if (cur->state == 2) {
+						cur->state = 3;
+						return NF_ACCEPT;
+					}
+					else if (cur->state == 3) {
+						cur->state = 4;
+						return NF_ACCEPT;
+					}
+					else
+						return NF_DROP;
+				}
+				if (f == RST) {
+					cur->state = 0;
+					return NF_ACCEPT;
+				}
 				/*if (cur->state == 0) {
 					//printk("at 0 state\n");
 					if (f == FIN || f == ACK) 
