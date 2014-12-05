@@ -20,7 +20,9 @@ void usage()
                 "    --src_port [XXX|any] : default is any \n"
                 "    --dst_ip [url|any] : default is any \n" 
                 "    --dst_port [XXX|any] : default is any \n"
-                "    --action [capture|dpi] : default is null\n", program_name);
+                "    --action [capture|dpi] : default is null\n"
+				"    --proto [protocol] : default is tcp\n"
+				"    --direction [direction] : default is in\n", program_name);
     exit(EXIT_FAILURE);
 }
 
@@ -51,6 +53,8 @@ int main(int argc, char **argv)
 	flow->dest_port = 0;
 	flow->action = 0;
 	flow->dev_file = dev_file;
+	flow->direction = 0;
+	flow->proto = 0;
 
     while(1) {
         static struct option long_options[] = 
@@ -62,6 +66,8 @@ int main(int argc, char **argv)
             {"dst_port", required_argument, 0, 0},
             {"action", required_argument, 0, 0},
             {"dev", required_argument, 0, 0},
+			{"direction", required_argument, 0, 0},
+			{"proto", required_argument, 0, 0},
             {0, 0, 0, 0}
         };
         int option_index = 0;
@@ -80,6 +86,11 @@ int main(int argc, char **argv)
 			char * disable = "disable";
 			char * capture = "capture";
 			char * dpi = "dpi";
+			char * tcp = "TCP";
+			char * udp = "UDP";
+			char * icmp = "ICMP";
+			char * in = "in";
+			char * out = "out";
 			struct hostent * host = (struct hostent *) malloc (sizeof(struct hostent));
             switch(option_index) {
             case 0:     // mode
@@ -129,6 +140,20 @@ int main(int argc, char **argv)
 				flow->dev_file = dev_file;
                 break;
             }
+			case 7:		// protocol
+				if (strcmp(optarg, tcp) == 0)
+					flow->proto = 0;
+				else if (strcmp(optarg, udp) == 0)
+					flow->proto = 1;
+				else if (strcmp(optarg, icmp) == 0)
+					flow->proto = 2;
+				else
+					flow->proto = 0;
+			case 8:		// direction
+				if (strcmp(optarg, in) == 0)
+					flow->direction = 0;
+				if (strcmp(optarg, out) == 0)
+					flow->direction = 1;
             break;
         default:
             usage();

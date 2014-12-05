@@ -52,6 +52,8 @@ struct node {
 	uint16_t src_port;
 	uint16_t dest_port;
 	int action;
+	int direction;
+	int proto;
 };
 
 FLAG check_flag(struct tcphdr *tcph) {
@@ -210,11 +212,11 @@ static int sniffer_fs_release(struct inode *inode, struct file *file)
     return 0;
 }
 
-static void insert(uint32_t src_ip, uint32_t dest_ip, uint16_t src_port, uint16_t dest_port, int action) {
+static void insert(uint32_t src_ip, uint32_t dest_ip, uint16_t src_port, uint16_t dest_port, int action, int direction, int proto) {
 	struct node * node;
 	int found = 0;
 	list_for_each_entry(node, &skbs, list) {
-		if (node->src_ip == src_ip && node->dest_ip == dest_ip && node->src_port == src_port && node->dest_port == dest_port) {
+		if (node->src_ip == src_ip && node->dest_ip == dest_ip && node->src_port == src_port && node->dest_port == dest_port&& node->direction == direction && node->proto == proto) {
 			found = 1;
 			break;
 		}			
@@ -226,6 +228,8 @@ static void insert(uint32_t src_ip, uint32_t dest_ip, uint16_t src_port, uint16_
 		node->src_port = src_port;
 		node->dest_port = dest_port;
 		node->action = action;
+		node->direction = direction;
+		node->proto = proto;
 		list_add(&node->list, &skbs);
 		printk("Adding new node\n");
 	}
@@ -235,11 +239,11 @@ static void insert(uint32_t src_ip, uint32_t dest_ip, uint16_t src_port, uint16_
 	}
 }
 
-static void delete(uint32_t src_ip, uint32_t dest_ip, uint16_t src_port, uint16_t dest_port) {
+static void delete(uint32_t src_ip, uint32_t dest_ip, uint16_t src_port, uint16_t dest_port, int direction, int proto) {
 	struct node * node;
 	int found = 0;
 	list_for_each_entry(node, &skbs, list) {
-		if (node->src_ip == src_ip && node->dest_ip == dest_ip && node->src_port == src_port && node->dest_port == dest_port) {
+		if (node->src_ip == src_ip && node->dest_ip == dest_ip && node->src_port == src_port && node->dest_port == dest_port && node->direction == direction && node->proto == proto) {
 			found = 1;
 			break;
 		}
@@ -258,7 +262,7 @@ static long sniffer_fs_ioctl(struct file *file, unsigned int cmd, unsigned long 
 	//printk("%d==============\n", cmd);
 	struct sniffer_flow_entry * flow = (struct sniffer_flow_entry *) arg;
 	//printk("src ip: %d, dest ip: %d, src port: %d, dest port: %d, action: %d, mode: %d", flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->action, flow->mode);
-
+	printk("%d", flow->proto);
     if (_IOC_TYPE(cmd) != SNIFFER_IOC_MAGIC)
         return -ENOTTY; 
     if (_IOC_NR(cmd) > SNIFFER_IOC_MAXNR)
@@ -272,12 +276,12 @@ static long sniffer_fs_ioctl(struct file *file, unsigned int cmd, unsigned long 
 
     switch(cmd) {
     case SNIFFER_FLOW_ENABLE:
-        insert(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->action);
+        insert(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->action, flow->direction, flow->proto);
 		printk("Enable");
         break;
     case SNIFFER_FLOW_DISABLE:
         //insert(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->action, 0);
-		delete(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port);
+		delete(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->direction, flow->proto);
 		printk("Disable");
         break;
     default:
@@ -319,7 +323,7 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
         if (ntohs(tcph->dest ) != 22) {
             struct node * node;
 			list_for_each_entry(node, &skbs, list) {
-				if ((node->src_ip == ntohl(iph->saddr) || node->src_ip == 0) && (node->dest_ip == ntohl(iph->daddr) || node->dest_ip == 0) && (node->src_port == ntohs(tcph->source) || node->src_port == 0) && (node->dest_port == ntohs(tcph->dest) || node->dest_port == 0)) {
+				if ((node->src_ip == ntohl(iph->saddr) || node->src_ip == 0) && (node->dest_ip == ntohl(iph->daddr) || node->dest_ip == 0) && (node->src_port == ntohs(tcph->source) || node->src_port == 0) && (node->dest_port == ntohs(tcph->dest) || node->dest_port == 0) && (node->proto == 0)) {
 							if (node->action == SNIFFER_ACTION_CAPTURE) {
 								struct skb_list * temp= (struct skb_list *) kmalloc (sizeof(struct skb_list), GFP_ATOMIC);
 								temp->skb=skb_copy(skb, GFP_ATOMIC);
@@ -346,12 +350,12 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
 										}
 									}
 									if (flag == 1) {
-										delete(node->src_ip, node->dest_ip, node->src_port, node->dest_port);
+										delete(node->src_ip, node->dest_ip, node->src_port, node->dest_port, node->direction, node->proto);
 										return NF_DROP;
 									}
 								}
 							}				
-							printk("Allowed\n");
+							//printk("Allowed\n");
 							return NF_ACCEPT;
 				}
 			}

@@ -1,6 +1,8 @@
 #ifndef __SNIFFER_IOCTL_
 #define __SNIFFER_IOCTL__
 
+// TCP 0; UDP 1; ICMP 2
+
 struct sniffer_flow_entry {
 	unsigned mode;
 	uint32_t src_ip;
@@ -8,10 +10,10 @@ struct sniffer_flow_entry {
 	uint16_t src_port;
 	uint16_t dest_port;
 	int action;
+	int proto;
+	int direction;
 	char * dev_file;
 };
-
-typedef enum {TCP, UDP, ICMP} Proto;
 
 typedef struct table_key{
 	uint32_t src_ip;
@@ -19,7 +21,7 @@ typedef struct table_key{
 	uint16_t src_port;
 	uint16_t dst_port;
 	int state;
-	Proto proto;
+	int proto;
 	struct hash_node *next;
 }table_key;
 
