@@ -108,15 +108,22 @@ void * find_key(linked_list * head, table_key * key, FLAG f) {
 				return cur;
 				}
 		}
-		if (f != SYN && f != SYNACK && f != ACK && f != FIN && f != RST) {
-			if ((cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur-> proto == key->proto) || (cur->src_ip == key->dst_ip && cur->dst_ip == key->src_ip && cur->src_port == key->dst_port && cur->dst_port == key->src_port && cur-> proto == key->proto)) {
-				//printk("in match\n");
+		if (f == INIT) {
+			if (cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur->proto == key->proto) {
+				printk("UDP matched!\n");
 				return cur;
 			}
 		}
-		if (f == INIT) {
-			if (cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur->proto == key->proto) {
-				printk("UDP or ICMP matched!\n");
+		if (f == ICMP) {
+			if (cur->src_ip == key->src_ip || cur->dst_ip == key->dst_ip && cur->proto == key->proto) {
+			
+				printk("ICMP matched!\n");
+				return cur;
+			}
+		}
+		if (f != SYN && f != SYNACK && f != ACK && f != FIN && f != RST && f != INIT && f != ICMP) {
+			if ((cur->src_ip == key->src_ip && cur->dst_ip == key->dst_ip && cur->src_port == key->src_port && cur->dst_port == key->dst_port && cur-> proto == key->proto) || (cur->src_ip == key->dst_ip && cur->dst_ip == key->src_ip && cur->src_port == key->dst_port && cur->dst_port == key->src_port && cur-> proto == key->proto)) {
+				//printk("in match\n");
 				return cur;
 			}
 		}
@@ -312,6 +319,38 @@ static long sniffer_fs_ioctl(struct file *file, unsigned int cmd, unsigned long 
     case SNIFFER_FLOW_DISABLE:
         //insert(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->action, 0);
 		delete(flow->src_ip, flow->dest_ip, flow->src_port, flow->dest_port, flow->direction, flow->proto);
+		if (flow->proto == 1) {
+			FLAG f = INIT;
+			table_key * key = (table_key *) kmalloc (sizeof(table_key), GFP_ATOMIC);
+			memset(key, 0, sizeof(table_key));
+			key->src_ip = flow->src_ip;
+			key->dst_ip = flow->dest_ip;
+			key->src_port = flow->src_port;
+			key->dst_port = flow->dest_port;
+			key->proto = 1;
+			key->state = 0;
+			key->next = NULL;
+			table_key * cur = find(table, key, f);
+			if (cur != NULL) {
+				cur->state = 1;
+			}
+		}
+		if (flow->proto == 2) {
+			FLAG f = ICMP;
+			table_key * key = (table_key *) kmalloc (sizeof(table_key), GFP_ATOMIC);
+			memset(key, 0, sizeof(table_key));
+			key->src_ip = flow->src_ip;
+			key->dst_ip = flow->dest_ip;
+			key->src_port = 5555;
+			key->dst_port = 5555;
+			key->proto = 2;
+			key->state = 0;
+			key->next = NULL;
+			table_key * cur = find(table, key, f);
+			if (cur != NULL) {
+				cur->state = 1;
+			}
+		}
 		printk("Disable\n");
         break;
     default:
@@ -335,12 +374,42 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
         int (*okfn) (struct sk_buff*))
 {
     struct iphdr *iph = ip_hdr(skb);
+	if (iph->protocol == IPPROTO_ICMP) {
+		FLAG f = ICMP;
+		table_key * key = (table_key *) kmalloc (sizeof(table_key), GFP_ATOMIC);
+		memset(key, 0, sizeof(table_key));
+		key->src_ip = ntohl(iph->saddr);
+		key->dst_ip = ntohl(iph->daddr);
+		key->src_port = 5555;
+		key->dst_port = 5555;
+		key->proto = 2;
+		key->state = 0;
+		key->next = NULL;
+		table_key * cur = find(table, key, f);
+		if (cur != NULL) {
+			printk("IN hash map\n");
+			if (cur->state == 1) 
+				return NF_DROP;
+			return NF_ACCEPT;
+		}
+		else {
+			printk("NOT IN HASH MAP\n");
+			struct node * node;
+			list_for_each_entry(node, &skbs, list) {
+				if ((node->src_ip == ntohl(iph->saddr) || node->src_ip == 0) && (node->dest_ip == ntohl(iph->daddr) || node->dest_ip == 0) && (node->proto == 2)) {
+					insert_into_table(table, key, f);
+					return NF_ACCEPT;
+				}
+			}
+		}
+		return NF_DROP;
+	}
 	if (iph->protocol == IPPROTO_UDP) {
 		struct udphdr *udph = ip_udp_hdr(iph);
-		/*if (ntohs(udph->dest) == 53)
+		if (ntohs(udph->dest) == 53)
 			return NF_ACCEPT;
 		if (ntohs(udph->source) == 53)
-			return NF_ACCEPT;*/
+			return NF_ACCEPT;
 		FLAG f = INIT;
 		table_key * key = (table_key *) kmalloc (sizeof(table_key), GFP_ATOMIC);
 		memset(key, 0, sizeof(table_key));
@@ -352,10 +421,13 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
 		key->state = 0;
 		key->next = NULL;
 		table_key * cur = find(table, key, f);
-		if (cur != NULL)
+		if (cur != NULL) {
+			if (cur->state == 1) 
+				return NF_DROP;
 			return NF_ACCEPT;
+		}
 		else {
-			printk("NOT IN HASH MAP\n");
+			//printk("NOT IN HASH MAP\n");
 			struct node * node;
 			list_for_each_entry(node, &skbs, list) {
 				if ((node->src_ip == ntohl(iph->saddr) || node->src_ip == 0) && (node->dest_ip == ntohl(iph->daddr) || node->dest_ip == 0) && (node->src_port == ntohs(udph->source) || node->src_port == 0) && (node->dest_port == ntohs(udph->dest) || node->dest_port == 0) && (node->proto == 1)) {
@@ -395,11 +467,10 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
 			// after SYN 0
 			// after SYNACK 1
 			if (cur != NULL) {
-				printk("in hash table\n");
+				//printk("in hash table\n");
 				if (f == SYN) {
 					if (cur->state == 4 || cur->state == 0) {
 						if (cur->state == 4) {
-							//TODO
 							cur->state = 0;
 							return NF_ACCEPT;
 						}
@@ -445,81 +516,10 @@ static unsigned int sniffer_nf_hook(unsigned int hook, struct sk_buff* skb,
 					cur->state = 0;
 					return NF_ACCEPT;
 				}
-				/*if (cur->state == 0) {
-					//printk("at 0 state\n");
-					if (f == FIN || f == ACK) 
-						return NF_DROP;
-					else if (f == SYN)
-						return NF_ACCEPT;
-					else if (f == SYNACK) {
-						cur->state = 1;
-						return NF_ACCEPT;
-					}
-					else
-						return NF_ACCEPT;
-				}
-				if (cur->state == 1) {
-					printk("at state 1\n");
-					if (f == SYN || f == FIN)
-						return NF_DROP;
-					else if (f == ACK) {
-						cur->state = 2;
-						return NF_ACCEPT;
-					}
-					else if (f == RST) {
-						cur->state = 0;
-						return NF_ACCEPT;
-					}
-					else
-						return NF_ACCEPT;
-				}
-				if (cur->state == 2) {
-					printk("at state 2\n");
-					if (f == SYN || f == SYNACK) {
-						printk("SYN/SYNACK\n");
-						return NF_DROP;
-					}
-					else if (f == FIN) {
-						cur->state = 3;
-						return NF_ACCEPT;
-					}
-					else if (f == RST) {
-						printk("RST");
-						cur->state = 0;
-						return NF_ACCEPT;
-					}
-					else {
-						printk("ACK");
-						return NF_ACCEPT;
-					}
-				}
-				if (cur->state == 3) {
-					printk("at state 3\n");
-					if (f == FIN) {
-						cur->state = 4;
-						return NF_ACCEPT;
-					}
-					else if (f == RST) {
-						cur->state = 0;
-						return NF_ACCEPT;
-					}
-					else
-						return NF_DROP;
-				}
-				if (cur->state == 4) {
-					printk("at state 4\n");
-					if (f == SYN) {
-						// TODO
-						cur->state = 0;
-						return NF_ACCEPT;
-					}
-					else
-						return NF_DROP;
-				}*/
 				return NF_ACCEPT;
 			}
 			else {
-				printk("not in hash table\n");
+				//printk("not in hash table\n");
             	struct node * node;
 				list_for_each_entry(node, &skbs, list) {
 					if ((node->src_ip == ntohl(iph->saddr) || node->src_ip == 0) && (node->dest_ip == ntohl(iph->daddr) || node->dest_ip == 0) && (node->src_port == ntohs(tcph->source) || node->src_port == 0) && (node->dest_port == ntohs(tcph->dest) || node->dest_port == 0) && (node->proto == 0)) {

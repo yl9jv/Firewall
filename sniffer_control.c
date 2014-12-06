@@ -147,8 +147,9 @@ int main(int argc, char **argv)
 					flow->proto = 1;
 				else if (strcmp(optarg, icmp) == 0)
 					flow->proto = 2;
-				else
+				else {
 					flow->proto = 0;
+				}
 			case 8:		// direction
 				if (strcmp(optarg, in) == 0)
 					flow->direction = 0;
